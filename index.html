@@ -5,16 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>XIAO 紫外线监测仪</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; text-align: center; padding: 20px; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; text-align: center; padding: 20px; margin: 0; }
         .card { background: white; border-radius: 15px; padding: 20px; margin: 15px auto; max-width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; font-size: 24px; margin-bottom: 10px; }
+        h1 { color: #333; font-size: 22px; margin-bottom: 10px; }
         button { background-color: #007bff; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; width: 100%; margin: 10px 0; font-weight: bold; }
         button:disabled { background-color: #ccc; }
-        .btn-start { background-color: #28a745; } /* 开始按钮用绿色 */
-        .data-row { font-size: 20px; margin: 10px 0; color: #333; }
+        .btn-start { background-color: #28a745; }
+        .data-row { font-size: 18px; margin: 10px 0; color: #333; }
         .value { font-weight: bold; color: #d9534f; }
         select { font-size: 16px; padding: 10px; border-radius: 5px; width: 100%; margin-bottom: 15px; border: 1px solid #ccc; }
         .status { font-size: 14px; color: #666; margin-top: 10px; }
+        #errorText { color: red; font-size: 12px; margin-top: 10px; word-break: break-all; text-align: left; background: #ffeeee; padding: 10px; border-radius: 5px; display: none; }
         .hidden { display: none; }
     </style>
 </head>
@@ -24,25 +25,25 @@
         <h1>☀️ 紫外线监测仪</h1>
         <button id="connectBtn">连接设备</button>
         <div class="status" id="statusText">状态：未连接</div>
+        <div id="errorText"></div>
     </div>
 
-    <!-- 隐藏的数据显示区，连接后才显示 -->
     <div id="dataPanel" class="hidden">
         <div class="card">
             <div class="data-row">实时紫外线 (UVI): <span class="value" id="uviValue">--</span></div>
             <div class="data-row">累积剂量 (D_eff): <span class="value" id="deffValue">--</span></div>
-            <div class="data-row">当前阈值: <span class="value" id="medValue">--</span></div>
+            <div class="data-row">当前阈值 (MED): <span class="value" id="medValue">--</span></div>
         </div>
 
         <div class="card">
             <label style="font-weight: bold;">选择皮肤光型:</label>
             <select id="fitzSelect">
-                <option value="1">I型 (总是灼伤) - MED 25</option>
-                <option value="2">II型 (容易灼伤) - MED 35</option>
-                <option value="3" selected>III型 (有时灼伤) - MED 50</option>
-                <option value="4">IV型 (很少灼伤) - MED 60</option>
-                <option value="5">V型 (极易晒黑) - MED 75</option>
-                <option value="6">VI型 (从不灼伤) - MED 90</option>
+                <option value="1">I型 - MED 25</option>
+                <option value="2">II型 - MED 35</option>
+                <option value="3" selected>III型 - MED 50</option>
+                <option value="4">IV型 - MED 60</option>
+                <option value="5">V型 - MED 75</option>
+                <option value="6">VI型 - MED 90</option>
             </select>
 
             <label style="font-weight: bold;">选择防晒霜 (SPF):</label>
@@ -53,7 +54,7 @@
                 <option value="50">SPF 50</option>
             </select>
 
-            <button id="startBtn" class="btn-start" style="margin-top: 20px;">🚀 开始测量</button>
+            <button id="startBtn" class="btn-start">🚀 开始测量</button>
         </div>
     </div>
 
@@ -63,33 +64,60 @@
         const TX_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 
         let rxCharacteristic, txCharacteristic;
+        const errorDiv = document.getElementById('errorText');
+        const statusText = document.getElementById('statusText');
 
-        // 1. 连接蓝牙
+        function showError(msg) {
+            errorDiv.style.display = 'block';
+            errorDiv.innerText += msg + "\n";
+            console.error(msg);
+        }
+
         document.getElementById('connectBtn').addEventListener('click', async () => {
+            errorDiv.style.display = 'none';
+            errorDiv.innerText = "";
+            statusText.innerText = "状态：正在搜索...";
+
             try {
-                document.getElementById('statusText').innerText = "状态：正在搜索...";
+                // 关键修改：不限制设备名称，扫描所有设备
                 const device = await navigator.bluetooth.requestDevice({
                     acceptAllDevices: true,
                     optionalServices: [SERVICE_UUID]
-                    optionalServices: [SERVICE_UUID]
                 });
+
+                statusText.innerText = "状态：正在连接 GATT...";
                 const server = await device.gatt.connect();
+
+                statusText.innerText = "状态：正在获取服务...";
                 const service = await server.getPrimaryService(SERVICE_UUID);
+
+                statusText.innerText = "状态：正在获取特征...";
                 rxCharacteristic = await service.getCharacteristic(RX_UUID);
                 txCharacteristic = await service.getCharacteristic(TX_UUID);
 
                 await txCharacteristic.startNotifications();
                 txCharacteristic.addEventListener('characteristicvaluechanged', handleData);
 
-                document.getElementById('statusText').innerText = "状态：已连接 ✅";
+                statusText.innerText = "状态：已连接 ✅";
                 document.getElementById('connectBtn').disabled = true;
-                document.getElementById('dataPanel').classList.remove('hidden'); // 显示配置面板
+                document.getElementById('dataPanel').classList.remove('hidden');
+                
+                // 监听断开
+                device.addEventListener('gattserverdisconnected', () => {
+                    statusText.innerText = "状态：设备已断开 ❌";
+                    document.getElementById('connectBtn').disabled = false;
+                    document.getElementById('dataPanel').classList.add('hidden');
+                });
+
             } catch (error) {
-                document.getElementById('statusText').innerText = "状态：连接失败 ❌";
+                statusText.innerText = "状态：连接失败 ❌";
+                showError("错误信息: " + error.message);
+                if(error.name === 'NotFoundError') {
+                    showError("提示：你取消了选择，或者没有找到设备。");
+                }
             }
         });
 
-        // 2. 接收主控发来的数据
         function handleData(event) {
             let text = new TextDecoder('utf-8').decode(event.target.value);
             try {
@@ -100,22 +128,20 @@
                 document.getElementById('uviValue').innerText = uvi;
                 document.getElementById('deffValue').innerText = deff;
                 document.getElementById('medValue').innerText = med;
-            } catch(e) { console.log("解析错误", text); }
+            } catch(e) { console.log("数据解析错误:", text); }
         }
 
-        // 3. 点击“开始测量”，发送配置数据
         document.getElementById('startBtn').addEventListener('click', async () => {
             if (!rxCharacteristic) return;
             let spf = document.getElementById('spfSelect').value;
             let fitz = document.getElementById('fitzSelect').value;
             
-            // 发送格式定为: "SPF:30,Fitz:3"
             let command = `SPF:${spf},Fitz:${fitz}`;
             let encoder = new TextEncoder('utf-8');
             await rxCharacteristic.writeValue(encoder.encode(command));
             
             document.getElementById('startBtn').innerText = "测量中...";
-            document.getElementById('startBtn').style.backgroundColor = "#6c757d"; // 变灰
+            document.getElementById('startBtn').style.backgroundColor = "#6c757d";
             document.getElementById('startBtn').disabled = true;
         });
     </script>
